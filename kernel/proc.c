@@ -303,6 +303,8 @@ fork(void)
 
   safestrcpy(np->name, p->name, sizeof(p->name));
 
+  np->trace_mask = p->trace_mask;
+
   pid = np->pid;
 
   release(&np->lock);
@@ -653,4 +655,16 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+int
+procs_num(void)
+{
+    struct proc *p;
+    int count = 0;
+    for(p = proc; p < &proc[NPROC]; p++) {
+        if(p->state != UNUSED)
+            count++;
+    }
+    return count;
 }
