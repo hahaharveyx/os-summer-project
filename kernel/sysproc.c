@@ -77,10 +77,45 @@ sys_sleep(void)
 
 
 #ifdef LAB_PGTBL
+extern pte_t *walk(pagetable_t, uint64, int);
 int
 sys_pgaccess(void)
 {
   // lab pgtbl: your code here.
+  uint64 start_virtual_addr;
+  int page_num;
+  uint64 user_bitmask;
+
+  // 解析系统调用的参数
+  if(argaddr(0, &start_virtual_addr) < 0)
+    return -1;
+  if(argint(1, &page_num) < 0)
+    return -1;
+  if(argaddr(2, &user_bitmask) < 0)
+    return -1;
+  if(page_num > 64 || page_num < 1 )
+    return -1;
+  struct proc *p = myproc();
+  uint64 mask = 0;
+
+  for(int i = 0; i < page_num; i++) {
+    pte_t *pte = walk(p->pagetable, start_virtual_addr + i * PGSIZE, 0);
+    if(pte == 0){
+        return -1;
+    }
+        
+
+    // 检查访问位并更新掩码
+    if(*pte & PTE_A) {
+        mask |= (1L << i);
+        // 清除访问位
+        *pte = *pte & ~PTE_A;
+    }
+  }
+
+  if(copyout(p->pagetable, user_bitmask, (char *)&mask, sizeof(mask)) < 0){
+    return -1;
+  } 
   return 0;
 }
 #endif

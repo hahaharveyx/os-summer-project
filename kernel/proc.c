@@ -120,6 +120,14 @@ found:
   p->pid = allocpid();
   p->state = USED;
 
+  //新添加 Allocate a usyscall page.
+  if((p->usyscallpage = (struct usyscall *)kalloc()) == 0){
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+  p->usyscallpage->pid = p->pid;
+
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
     freeproc(p);
@@ -155,6 +163,12 @@ freeproc(struct proc *p)
   p->trapframe = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
+  //新添加 释放之前分配的页
+  if(p->usyscallpage){
+    kfree((void*)p->usyscallpage);
+  }
+  p->usyscallpage = 0;
+
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -164,6 +178,8 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+
+  
 }
 
 // Create a user page table for a given process,
@@ -177,6 +193,13 @@ proc_pagetable(struct proc *p)
   pagetable = uvmcreate();
   if(pagetable == 0)
     return 0;
+
+  //新添加
+  if(mappages(pagetable, USYSCALL, PGSIZE, 
+              (uint64)(p->usyscallpage), PTE_R | PTE_U) < 0) {
+    uvmfree(pagetable, 0);
+    return 0;
+  }
 
   // map the trampoline code (for system call return)
   // at the highest user virtual address.
@@ -206,6 +229,7 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
 {
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
   uvmunmap(pagetable, TRAPFRAME, 1, 0);
+  uvmunmap(pagetable, USYSCALL, 1, 0);
   uvmfree(pagetable, sz);
 }
 
