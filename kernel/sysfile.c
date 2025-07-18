@@ -283,6 +283,38 @@ create(char *path, short type, short major, short minor)
   return ip;
 }
 
+static struct inode* recursive_symlink(struct inode *ip) {
+  struct inode *next;
+  char symlink_path[MAXPATH];
+  int depth = 0;  // 递归深度计数
+
+  while (ip->type == T_SYMLINK) {
+    if (depth++ >= 10) {  // 限制递归深度以防止无限循环
+      iunlockput(ip);
+      return 0;  
+    }
+
+    // 读取符号链接的目标路径
+    if (readi(ip, 0, (uint64)symlink_path, 0, ip->size) != ip->size) {
+      iunlockput(ip);
+      return 0;
+    }
+    symlink_path[ip->size] = '\0';  // 确保字符串以 null 结尾
+
+    iunlockput(ip);
+
+    // 查找目标路径对应的 inode
+    if ((next = namei(symlink_path)) == 0) {
+      return 0;  
+    }
+
+    ip = next;  // 继续解析目标路径
+    ilock(ip);  // 锁定新解析的 inode
+  }
+
+  return ip;  // 返回最终解析后的 inode
+}
+
 uint64
 sys_open(void)
 {
@@ -320,6 +352,13 @@ sys_open(void)
     iunlockput(ip);
     end_op();
     return -1;
+  }
+
+  if(ip->type == T_SYMLINK && (omode & O_NOFOLLOW) == 0) {
+    if((ip = recursive_symlink(ip)) == 0) {
+      end_op();
+      return -1;
+    }
   }
 
   if((f = filealloc()) == 0 || (fd = fdalloc(f)) < 0){
@@ -482,5 +521,32 @@ sys_pipe(void)
     fileclose(wf);
     return -1;
   }
+  return 0;
+}
+
+uint64 sys_symlink(void) {
+  char target[MAXPATH], path[MAXPATH];
+  struct inode *ip;
+  int n;
+
+  if ((n = argstr(0, target, MAXPATH)) < 0 || argstr(1, path, MAXPATH) < 0) {
+      return -1;
+  }
+
+  begin_op();
+  // 创建符号链接的 inode
+  if((ip = create(path, T_SYMLINK, 0, 0)) == 0) {
+      end_op();
+      return -1;
+  }
+  // 将目标路径写入节点
+  if(writei(ip, 0, (uint64)target, 0, n) != n) {
+      iunlockput(ip);
+      end_op();
+      return -1;
+  }
+
+  iunlockput(ip);
+  end_op();
   return 0;
 }
