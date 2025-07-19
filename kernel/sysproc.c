@@ -104,11 +104,12 @@ sys_sigalarm(void)
   int ticks;
   uint64 handler_virtual_addr;
 
-  struct proc *p = myproc();
-  p->alarm_interval = ticks;
-  p->handler_virtual_addr = handler_virtual_addr;
-  p->alarm_ticks=0;
-  p->is_return = 1; // true
+  argint(0, &ticks);  //解析参数
+  argaddr(1, &handler_virtual_addr);
+  struct proc* proc = myproc();
+  proc->alarm_interval = ticks;
+  proc->handler_virtual_addr = handler_virtual_addr;
+  proc->is_return = 1; // true
   return 0;
 }
 
