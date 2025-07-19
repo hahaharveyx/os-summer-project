@@ -5,6 +5,10 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "sleeplock.h"  
+#include "fs.h"         
+#include "file.h"       
+#include "fcntl.h" 
 
 struct spinlock tickslock;
 uint ticks;
@@ -65,9 +69,54 @@ usertrap(void)
     intr_on();
 
     syscall();
-  } else if((which_dev = devintr()) != 0){
+  } 
+  else if (r_scause() == 12 || r_scause() == 13 || r_scause() == 15) { // mmap page fault 
+    uint64 va = PGROUNDDOWN(r_stval());
+    struct vm_area *vma = 0;
+    int flags = PTE_U;
+    int i;
+
+    for (i = 0; i < NVMA; ++i) {
+      // 找到对应的 VMA
+      if (p->vma[i].addr && va >= p->vma[i].addr
+          && va < p->vma[i].addr + p->vma[i].len) {
+        vma = &p->vma[i];
+        break;
+      }
+    }
+    if (!vma) {
+      goto err;  // 没找到属于当前 VMA 的地址，说明不是 mmap 区域的页错
+    }
+
+    char *pa = kalloc();
+    if (!pa)
+      goto err;
+    memset(pa, 0, PGSIZE);
+    ilock(vma->f->ip);
+    if (readi(vma->f->ip, 0, (uint64) pa, va - vma->addr + vma->offset, PGSIZE) < 0) {
+      iunlock(vma->f->ip);
+      kfree(pa);
+      goto err;
+    }
+    iunlock(vma->f->ip);
+
+    // 设置页权限
+    if (vma->prot & PROT_READ)
+      flags |= PTE_R;
+    if (vma->prot & PROT_WRITE)
+      flags |= PTE_W;
+    if (vma->prot & PROT_EXEC)
+      flags |= PTE_X;
+
+    if (mappages(p->pagetable, va, PGSIZE, (uint64) pa, flags) != 0) {
+      kfree(pa);
+      goto err;
+    }
+  }
+  else if((which_dev = devintr()) != 0){
     // ok
   } else {
+  err:
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
